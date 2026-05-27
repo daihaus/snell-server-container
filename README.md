@@ -1,9 +1,41 @@
 # Snell Server Standalone
 
-forked from [geekdada/snell-server](https://github.com/geekdada/snell-server)
+Docker image for [snell-server](https://manual.nssurge.com/others/snell.html)
+
+Forked from [geekdada/snell-server-docker](https://github.com/geekdada/snell-server-docker).
 
 ## Usage
+
+### Available versions
+
+> **Note**
+>
+> Version 4 isn't compatible with version 3 clients.
+
+All available versions are listed in the GitHub Container Registry package tags.
+
+### Run
+
+`PORT` is optional and defaults to `9102`. Configure `PSK` and `PORT` with either command arguments or environment variables.
 
 ```bash
 docker run -d --rm -p 7000:7000 ghcr.io/xdanger/snell-container:4.0.1 --psk <your_psk_here> --port 7000
 ```
+
+```bash
+docker run -d --rm -e PSK=<your_psk_here> -e PORT=7000 -p 7000:7000 ghcr.io/xdanger/snell-container:4.0.1
+```
+
+If you want to use the service as a Surge Ponte relay server, exposing all ports is recommended:
+
+```bash
+docker run -d --rm -e PSK=<your_psk_here> --name snell --network host ghcr.io/xdanger/snell-container:4.0.1
+```
+
+### Build
+
+```bash
+./build.sh 4.0.1 stable
+```
+
+Stable builds publish the version, major version, and `latest` tags. Beta builds publish only the version tag.

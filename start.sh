@@ -3,18 +3,35 @@
 set -e
 
 BIN="/usr/local/bin/snell-server"
-CNF="/etc/snell-server.conf"
-PRT="9102"
-PSK=""
+CONF="/etc/snell-server.conf"
+PORT="${PORT:-9102}"
+PSK="${PSK:-}"
+
+run_bin() {
+    echo "Running snell-server with config:"
+    echo ""
+    cat "${CONF}"
+
+    "${BIN}" --version
+    exec "${BIN}" -c "${CONF}"
+}
 
 while [ $# -gt 0 ]; do
     case "$1" in
     --psk)
+        if [ -z "${2:-}" ]; then
+            echo "Missing value for --psk"
+            exit 1
+        fi
         PSK="$2"
         shift 2
         ;;
     --port)
-        PRT="$2"
+        if [ -z "${2:-}" ]; then
+            echo "Missing value for --port"
+            exit 1
+        fi
+        PORT="$2"
         shift 2
         ;;
     *)
@@ -24,24 +41,21 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ -z ${PSK} ]; then
+if [ -z "${PSK}" ]; then
     PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
     echo "Using generated PSK: ${PSK}"
 else
     echo "Using predefined PSK: ${PSK}"
 fi
 
-if [ -f ${CNF} ]; then
-    echo "Deleting existed ${CNF}"
-    rm -f ${CNF}
+if [ -f "${CONF}" ]; then
+    echo "Deleting existing ${CONF}"
+    rm -f "${CONF}"
 fi
 
-echo "[snell-server]" >> ${CNF}
-echo "listen = 0.0.0.0:${PRT}" >> ${CNF}
-echo "psk = ${PSK}" >> ${CNF}
-echo "Running snell-server with config:"
-echo ""
-cat ${CNF}
+echo "Generating new config..."
+echo "[snell-server]" >>"${CONF}"
+echo "listen = 0.0.0.0:${PORT}" >>"${CONF}"
+echo "psk = ${PSK}" >>"${CONF}"
 
-${BIN} --version
-${BIN} -c ${CNF}
+run_bin
