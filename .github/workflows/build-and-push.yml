@@ -1,0 +1,202 @@
+name: Build and push image
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "snell-server version to build (e.g. 5.0.1)"
+        required: true
+        default: "5.0.1"
+        type: string
+      channel:
+        description: "Release channel"
+        required: true
+        default: "stable"
+        type: choice
+        options:
+          - stable
+          - beta
+  push:
+    tags:
+      - "v*"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      channel: ${{ steps.vars.outputs.channel }}
+      tags: ${{ steps.vars.outputs.tags }}
+    steps:
+      - name: Resolve version, channel and tags
+        id: vars
+        env:
+          # Bind event data to env vars so it is never interpolated into the
+          # script text by the Actions expression engine (avoids shell injection).
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            version="$INPUT_VERSION"
+            channel="$INPUT_CHANNEL"
+          else
+            # tag push, e.g. v5.0.1 -> 5.0.1
+            version="${REF_NAME#v}"
+            if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              channel="stable"
+            else
+              channel="beta"
+            fi
+          fi
+
+          # Allow only a digit-led token of Docker-tag-safe chars [0-9A-Za-z.-]
+          # (no whitespace, shell metacharacters, or '+'), so the value is safe to
+          # use downstream and is always a valid image tag.
+          if [[ ! "$version" =~ ^[0-9][0-9A-Za-z.-]*$ ]]; then
+            echo "::error::invalid version: '$version' (must be a valid Docker tag)"
+            exit 1
+          fi
+          if [ "$channel" != "stable" ] && [ "$channel" != "beta" ]; then
+            echo "::error::invalid channel: '$channel'"
+            exit 1
+          fi
+
+          # Mirror build.sh: stable -> version + major + latest; beta -> version only
+          major="${version%%.*}"
+          tags="$version"
+          if [ "$channel" = "stable" ]; then
+            tags="$tags $major latest"
+          fi
+
+          {
+            echo "version=$version"
+            echo "channel=$channel"
+            echo "tags=$tags"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Resolved version=$version channel=$channel tags=[$tags]"
+
+  build:
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Prepare platform pair
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
+
+      - name: Docker metadata (labels)
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest list
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+        run: |
+          set -euo pipefail
+          read -ra tag_list <<< "$TAGS"
+          tag_args=()
+          for t in "${tag_list[@]}"; do
+            tag_args+=("-t" "${REGISTRY}/${IMAGE_NAME}:${t}")
+          done
+          digest_refs=()
+          for d in *; do
+            digest_refs+=("${REGISTRY}/${IMAGE_NAME}@sha256:${d}")
+          done
+          docker buildx imagetools create "${tag_args[@]}" "${digest_refs[@]}"
+
+      - name: Inspect pushed image
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+        run: |
+          set -euo pipefail
+          read -ra tag_list <<< "$TAGS"
+          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${tag_list[0]}"
