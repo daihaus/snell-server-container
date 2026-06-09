@@ -64,10 +64,11 @@ jobs:
             fi
           fi
 
-          # Allow only a digit-led token of [0-9A-Za-z.+-] (no whitespace or shell
-          # metacharacters) so the value is safe to use downstream.
-          if [[ ! "$version" =~ ^[0-9][0-9A-Za-z.+-]*$ ]]; then
-            echo "::error::invalid version: '$version'"
+          # Allow only a digit-led token of Docker-tag-safe chars [0-9A-Za-z.-]
+          # (no whitespace, shell metacharacters, or '+'), so the value is safe to
+          # use downstream and is always a valid image tag.
+          if [[ ! "$version" =~ ^[0-9][0-9A-Za-z.-]*$ ]]; then
+            echo "::error::invalid version: '$version' (must be a valid Docker tag)"
             exit 1
           fi
           if [ "$channel" != "stable" ] && [ "$channel" != "beta" ]; then
