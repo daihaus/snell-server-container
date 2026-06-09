@@ -10,7 +10,7 @@ COPY start.sh /start.sh
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget unzip ca-certificates && \
     chmod +x /get_url.sh /start.sh && \
-    wget -q -O "snell-server.zip" "$(/get_url.sh "${VERSION}" "${TARGETARCH}")" && \
+    wget -q -O "snell-server.zip" "$(/get_url.sh "${VERSION}" "${TARGETARCH:-$(dpkg --print-architecture)}")" && \
     unzip snell-server.zip && rm snell-server.zip && \
     apt-get remove -y wget unzip && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/* /get_url.sh
