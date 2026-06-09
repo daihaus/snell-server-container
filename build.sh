@@ -4,9 +4,8 @@ set -euo pipefail
 
 VERSION=${1:-}
 CHANNEL=${2:-stable}
-PLATFORM=${PLATFORM:-linux/aarch64}
-ARCH=${ARCH:-arm64}
-IMAGE_NAME=${IMAGE_NAME:-ghcr.io/xdanger/snell-container}
+PLATFORM=${PLATFORM:-linux/amd64,linux/arm64}
+IMAGE_NAME=${IMAGE_NAME:-ghcr.io/daihaus/snell-server-container}
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -30,18 +29,17 @@ show_usage() {
   echo "Usage: $0 VERSION [CHANNEL]"
   echo ""
   echo "Parameters:"
-  echo "  VERSION  required version, for example: 4.0.1 or 5.0.0-beta"
+  echo "  VERSION  required version, for example: 5.0.1 or 5.1.0-beta"
   echo "  CHANNEL  optional release channel: stable or beta; default: stable"
   echo ""
   echo "Environment overrides:"
-  echo "  IMAGE_NAME  default: ghcr.io/xdanger/snell-container"
-  echo "  PLATFORM    default: linux/aarch64"
-  echo "  ARCH        default: arm64"
+  echo "  IMAGE_NAME  default: ghcr.io/daihaus/snell-server-container"
+  echo "  PLATFORM    default: linux/amd64,linux/arm64"
   echo ""
   echo "Examples:"
-  echo "  $0 4.0.1"
-  echo "  $0 4.0.1 stable"
-  echo "  $0 5.0.0-beta beta"
+  echo "  $0 5.0.1"
+  echo "  $0 5.0.1 stable"
+  echo "  $0 5.1.0-beta beta"
 }
 
 if [ -z "$VERSION" ]; then
@@ -51,7 +49,7 @@ if [ -z "$VERSION" ]; then
 fi
 
 if [[ ! "$VERSION" =~ ^[0-9]+ ]]; then
-  print_error "version must start with a number, for example: 4.0.1 or 5.0.0-beta"
+  print_error "version must start with a number, for example: 5.0.1 or 5.1.0-beta"
   show_usage
   exit 1
 fi
@@ -89,13 +87,11 @@ print_info "Version: $VERSION"
 print_info "Channel: $CHANNEL"
 print_info "Image: $IMAGE_NAME"
 print_info "Platform: $PLATFORM"
-print_info "Arch: $ARCH"
 
 docker buildx build \
   --push \
   --platform "${PLATFORM}" \
   --build-arg "VERSION=${VERSION}" \
-  --build-arg "ARCH=${ARCH}" \
   "${TAG_ARGS[@]}" \
   .
 
