@@ -48,8 +48,8 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
-if [[ ! "$VERSION" =~ ^[0-9]+ ]]; then
-  print_error "version must start with a number, for example: 5.0.1 or 5.1.0-beta"
+if [[ ! "$VERSION" =~ ^[0-9][0-9A-Za-z.-]*$ ]]; then
+  print_error "version must be a valid Docker tag starting with a number, for example: 5.0.1 or 5.1.0-beta"
   show_usage
   exit 1
 fi
