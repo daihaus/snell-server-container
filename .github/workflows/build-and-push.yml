@@ -42,15 +42,21 @@ jobs:
     steps:
       - name: Resolve version, channel and tags
         id: vars
+        env:
+          # Bind event data to env vars so it is never interpolated into the
+          # script text by the Actions expression engine (avoids shell injection).
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            version="${{ github.event.inputs.version }}"
-            channel="${{ github.event.inputs.channel }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            version="$INPUT_VERSION"
+            channel="$INPUT_CHANNEL"
           else
-            # tag push, e.g. refs/tags/v5.0.1 -> 5.0.1
-            ref="${GITHUB_REF#refs/tags/}"
-            version="${ref#v}"
+            # tag push, e.g. v5.0.1 -> 5.0.1
+            version="${REF_NAME#v}"
             if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               channel="stable"
             else
@@ -58,8 +64,14 @@ jobs:
             fi
           fi
 
-          if [[ ! "$version" =~ ^[0-9]+ ]]; then
-            echo "::error::version must start with a number (got '$version')"
+          # Allow only a digit-led token of [0-9A-Za-z.+-] (no whitespace or shell
+          # metacharacters) so the value is safe to use downstream.
+          if [[ ! "$version" =~ ^[0-9][0-9A-Za-z.+-]*$ ]]; then
+            echo "::error::invalid version: '$version'"
+            exit 1
+          fi
+          if [ "$channel" != "stable" ] && [ "$channel" != "beta" ]; then
+            echo "::error::invalid channel: '$channel'"
             exit 1
           fi
 
@@ -94,9 +106,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare platform pair
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          platform="${{ matrix.platform }}"
-          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+          echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
 
       - name: Docker metadata (labels)
         id: meta
@@ -127,10 +140,11 @@ jobs:
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          mkdir -p "${{ runner.temp }}/digests"
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
 
       - name: Upload digest
         uses: actions/upload-artifact@v4
@@ -163,10 +177,13 @@ jobs:
 
       - name: Create and push manifest list
         working-directory: ${{ runner.temp }}/digests
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
         run: |
           set -euo pipefail
+          read -ra tag_list <<< "$TAGS"
           tag_args=()
-          for t in ${{ needs.prepare.outputs.tags }}; do
+          for t in "${tag_list[@]}"; do
             tag_args+=("-t" "${REGISTRY}/${IMAGE_NAME}:${t}")
           done
           digest_refs=()
@@ -176,7 +193,9 @@ jobs:
           docker buildx imagetools create "${tag_args[@]}" "${digest_refs[@]}"
 
       - name: Inspect pushed image
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
         run: |
           set -euo pipefail
-          first_tag="$(echo '${{ needs.prepare.outputs.tags }}' | awk '{print $1}')"
-          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${first_tag}"
+          read -ra tag_list <<< "$TAGS"
+          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${tag_list[0]}"
