@@ -2,6 +2,8 @@
 
 Docker image for [snell-server](https://manual.nssurge.com/others/snell.html)
 
+[![Build and push image](https://github.com/daihaus/snell-server-container/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/daihaus/snell-server-container/actions/workflows/build-and-push.yml)
+
 Forked from [geekdada/snell-server-docker](https://github.com/geekdada/snell-server-docker).
 
 ## Usage
@@ -39,3 +41,12 @@ docker run -d --rm -e PSK=<your_psk_here> --name snell --network host ghcr.io/da
 ```
 
 Stable builds publish the version, major version, and `latest` tags. Beta builds publish only the version tag.
+
+### Publishing via GitHub Actions
+
+Images are also built and pushed to GHCR by the [Build and push image](.github/workflows/build-and-push.yml) workflow:
+
+- **Manual:** Actions tab → _Build and push image_ → _Run workflow_, then enter the snell version (default `5.0.1`) and channel.
+- **Git tag:** push a tag such as `v5.0.1` (stable) or `v5.1.0-beta` (beta) to build that version.
+
+It builds `linux/amd64` and `linux/arm64` on native runners, merges them into one manifest, and authenticates with the built-in `GITHUB_TOKEN` — no PAT required.
